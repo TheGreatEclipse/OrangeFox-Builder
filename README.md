@@ -32,13 +32,6 @@ your-repo/
 │   └── tools/
 │       ├── ldcheck         ← optional, only needed if you enable LDCheck
 │       └── libneeds        ← optional, only needed if you enable LDCheck
-│
-└── (Tree branch)
-    ├── Android.mk
-    ├── AndroidProducts.mk
-    ├── BoardConfig.mk
-    ├── device.mk
-    └── ...
 ```
 
 ### 2 — Add secrets (optional but recommended)
