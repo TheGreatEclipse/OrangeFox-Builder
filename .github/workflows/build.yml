@@ -16,13 +16,24 @@ on:
         description: "Device tree repo URL (e.g. https://github.com/mkpromvp/recovery_device_xiaomi_spinel.git)"
         required: true
         type: string
-        default: "https://github.com/mkpromvp/recovery_device_xiaomi_spinel.git"
 
       DEVICE_TREE_BRANCH:
         description: "Device tree branch"
         required: true
         type: string
         default: "main"
+
+      DEVICE_VENDOR:
+        description: "Vendor name (e.g. xiaomi) — tree clones to device/<vendor>/<product>"
+        required: true
+        type: string
+        default: "xiaomi"
+
+      DEVICE_PRODUCT:
+        description: "Product/codename (e.g. spinel) — tree clones to device/<vendor>/<product>"
+        required: true
+        type: string
+        default: "spinel"
 
       OF_MAINTAINER_PATCH_VERSION:
         description: "Maintainer patch version (digits only, e.g. 1)"
@@ -64,12 +75,10 @@ jobs:
     if: github.event.repository.owner.id == github.event.sender.id
     timeout-minutes: 720
     permissions:
-      contents: write
+      contents: read
 
     env:
       GITHUB_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
-      TG_TOKEN:      ${{ secrets.TG_TOKEN }}
-      TG_CHAT_ID:    ${{ secrets.TG_CHAT_ID }}
       # ── Fixed device values ────────────────────────────────────────────────
       DEVICE:        spinel
       OEM:           xiaomi
@@ -92,6 +101,8 @@ jobs:
           echo "Branch       : ${{ github.event.inputs.FOX_BRANCH }}"
           echo "Target       : vendorbootimage (Recovery-as-Vendor · GKI 2.0)"
           echo "Device tree  : ${{ github.event.inputs.DEVICE_TREE_URL }} @ ${{ github.event.inputs.DEVICE_TREE_BRANCH }}"
+          echo "Vendor       : ${{ github.event.inputs.DEVICE_VENDOR }}"
+          echo "Product      : ${{ github.event.inputs.DEVICE_PRODUCT }}"
           echo "Maintainer   : TheGreatEclipse"
           echo "LDCheck      : ${{ github.event.inputs.LDCHECK }}"
 
@@ -154,17 +165,6 @@ jobs:
           git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
           git config --global color.ui   false
 
-      # ── Telegram: started ─────────────────────────────────────────────────
-      - name: Telegram — build started
-        if: env.TG_TOKEN != ''
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT_ID}" \
-            -d parse_mode="HTML" \
-            -d text="$(printf \
-              '🦊 <b>OrangeFox CI · Xiaomi Spinel</b>\n\n✔️ Build triggered!\n\n📱 Device: <code>spinel</code> (Xiaomi)\n🌿 Branch: <code>%s</code>\n🎯 Target: <code>vendorbootimage</code> (RaV · GKI 2.0)\n👤 Maintainer: TheGreatEclipse\n🌲 Logs: <a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">View</a>' \
-              "$FOX_BRANCH")"
-
       # ── Sync via official orangefox_sync.sh ──────────────────────────────
       - name: Clone orangefox_sync
         run: |
@@ -195,57 +195,40 @@ jobs:
               external/guava
           fi
 
-      # ── Clone spinel device tree (user-supplied repo + branch) ───────────
-      - name: Clone spinel device tree
+      # ── Clone device tree (user-supplied repo + branch + vendor/product) ─
+      - name: Clone device tree
         run: |
           cd "$SYNC_PATH"
 
           DEVICE_TREE_URL="${{ github.event.inputs.DEVICE_TREE_URL }}"
           DEVICE_TREE_BRANCH="${{ github.event.inputs.DEVICE_TREE_BRANCH }}"
+          DEVICE_VENDOR="${{ github.event.inputs.DEVICE_VENDOR }}"
+          DEVICE_PRODUCT="${{ github.event.inputs.DEVICE_PRODUCT }}"
 
-          if [ -z "$DEVICE_TREE_URL" ] || [ -z "$DEVICE_TREE_BRANCH" ]; then
-            echo "❌ DEVICE_TREE_URL and DEVICE_TREE_BRANCH are both required."
+          if [ -z "$DEVICE_TREE_URL" ] || [ -z "$DEVICE_TREE_BRANCH" ] || \
+             [ -z "$DEVICE_VENDOR" ]   || [ -z "$DEVICE_PRODUCT" ]; then
+            echo "❌ DEVICE_TREE_URL, DEVICE_TREE_BRANCH, DEVICE_VENDOR and DEVICE_PRODUCT are all required."
             exit 1
           fi
 
-          echo "Cloning device tree: $DEVICE_TREE_URL @ $DEVICE_TREE_BRANCH"
+          DEVICE_DIRECTORY="device/$DEVICE_VENDOR"
+          DEVICE_NAME="$DEVICE_PRODUCT"
 
-          # Clone the user-supplied device tree repo/branch into a staging dir
+          echo "Cloning device tree: $DEVICE_TREE_URL @ $DEVICE_TREE_BRANCH"
+          echo "Target path        : $DEVICE_DIRECTORY/$DEVICE_NAME"
+
+          mkdir -p "$DEVICE_DIRECTORY"
+
+          # Clone the user-supplied device tree repo/branch directly into device/<vendor>/<product>
           git clone --depth=1 \
             "$DEVICE_TREE_URL" \
             -b "$DEVICE_TREE_BRANCH" \
-            ./device_tree_staging
-
-          # Extract PRODUCT_BRAND, PRODUCT_DEVICE from .mk files
-          cd device_tree_staging
-          DEVICE_MAKEFILE=""
-          DEVICE_DIRECTORY=""
-          DEVICE_NAME=""
-          for file in *.mk; do
-            makefile=$(sed -n 's/^[[:space:]]*PRODUCT_NAME[[:space:]]*:=\s*\(.*\)/\1/p' "$file")
-            brand=$(sed -n    's/^[[:space:]]*PRODUCT_BRAND[[:space:]]*:=\s*\(.*\)/\1/p' "$file")
-            codename=$(sed -n 's/^[[:space:]]*PRODUCT_DEVICE[[:space:]]*:=\s*\(.*\)/\1/p' "$file")
-            if [[ -n "$makefile" && -n "$brand" && -n "$codename" ]]; then
-              DEVICE_MAKEFILE="$makefile"
-              DEVICE_DIRECTORY="device/xiaomi"
-              DEVICE_NAME="$codename"
-              break
-            fi
-          done
-          cd ..
-
-          # Fall back to hardcoded values if .mk parsing fails
-          DEVICE_DIRECTORY="${DEVICE_DIRECTORY:-device/xiaomi}"
-          DEVICE_NAME="${DEVICE_NAME:-spinel}"
-
-          mkdir -p "$DEVICE_DIRECTORY"
-          mv device_tree_staging "$DEVICE_DIRECTORY/$DEVICE_NAME"
+            "$DEVICE_DIRECTORY/$DEVICE_NAME"
 
           COMMIT_ID=$(git -C "$DEVICE_DIRECTORY/$DEVICE_NAME" rev-parse HEAD)
           {
             echo "DEVICE_NAME=$DEVICE_NAME"
             echo "DEVICE_DIRECTORY=$DEVICE_DIRECTORY"
-            echo "DEVICE_MAKEFILE=$DEVICE_MAKEFILE"
             echo "COMMIT_ID=$COMMIT_ID"
             echo "DEVICE_TREE_URL=$DEVICE_TREE_URL"
             echo "DEVICE_TREE_BRANCH=$DEVICE_TREE_BRANCH"
@@ -334,66 +317,19 @@ jobs:
             echo "No .zip found in $OUT"
           fi
 
-      # ── Upload to GitHub Release ─────────────────────────────────────────
-      - name: Upload to GitHub Release
+      # ── Upload build as GitHub Actions artifact ───────────────────────────
+      - name: Upload artifact to GitHub
         if: env.CHECK_IMG_IS_OK == 'true' && env.CHECK_ZIP_IS_OK == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: "OrangeFox-${{ env.DEVICE_NAME }}-${{ env.FOX_BRANCH }}-${{ env.BUILD_DATE }}"
+          path: |
             ${{ env.SYNC_PATH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.img
             ${{ env.SYNC_PATH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.img.tar
             ${{ env.SYNC_PATH }}/out/target/product/${{ env.DEVICE_NAME }}/OrangeFox*.zip
             ${{ env.SYNC_PATH }}/out/target/product/${{ env.DEVICE_NAME }}/ramdisk-recovery.*
-          name: "OrangeFox for spinel // ${{ env.BUILD_DATE }}"
-          tag_name: ${{ github.run_id }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          body: |
-            ## 🦊 OrangeFox Recovery — Xiaomi Spinel
-
-            | | |
-            |---|---|
-            | **Branch** | `${{ env.FOX_BRANCH }}` |
-            | **Target** | `vendorbootimage` (Recovery-as-Vendor · GKI 2.0) |
-            | **Device tree** | [${{ env.DEVICE_TREE_URL }}](${{ env.DEVICE_TREE_URL }}) @ `${{ env.DEVICE_TREE_BRANCH }}` |
-            | **Tree commit** | `${{ env.COMMIT_ID }}` |
-            | **Maintainer** | TheGreatEclipse |
-            | **Build date** | `${{ env.BUILD_DATE }}` |
-            | **MD5 (img)** | `${{ env.MD5_IMG }}` |
-            | **MD5 (zip)** | `${{ env.MD5_ZIP }}` |
-
-      # ── Mirror to oshi.at ─────────────────────────────────────────────────
-      - name: Mirror to oshi.at
-        if: env.CHECK_ZIP_IS_OK == 'true'
-        run: |
-          OUT="$SYNC_PATH/out/target/product/${DEVICE_NAME}"
-          FILE=$(ls "$OUT"/OrangeFox*.zip 2>/dev/null | head -1)
-          [ -z "$FILE" ] && exit 0
-          RESULT=$(curl -sT "$FILE" "https://oshi.at/$(basename "$FILE")/20160")
-          MIRROR_LINK=$(echo "$RESULT" | grep -i "DL:" | awk '{print $2}')
-          echo "MIRROR_LINK=$MIRROR_LINK" >> "$GITHUB_ENV"
-          echo "Mirror: $MIRROR_LINK"
-
-      # ── Telegram: success ─────────────────────────────────────────────────
-      - name: Telegram — success
-        if: success() && env.TG_TOKEN != '' && env.CHECK_ZIP_IS_OK == 'true'
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT_ID}" \
-            -d parse_mode="HTML" \
-            -d text="$(printf \
-              '🦊 <b>OrangeFox CI · Xiaomi Spinel</b>\n\n✅ Build complete!\n\n📱 Device: <code>spinel</code>\n🌿 Branch: <code>%s</code>\n🎯 Target: <code>vendorbootimage</code>\n📦 File: <code>%s</code>\n🔐 MD5: <code>%s</code>\n⬇️ Mirror: <a href="%s">oshi.at</a>\n🌲 Release: <a href="https://github.com/${{ github.repository }}/releases/tag/${{ github.run_id }}">GitHub</a>\n👤 By: TheGreatEclipse' \
-              "$FOX_BRANCH" "$FILENAME" "$MD5_ZIP" "$MIRROR_LINK")"
-
-      # ── Telegram: failure ─────────────────────────────────────────────────
-      - name: Telegram — failure
-        if: failure() && env.TG_TOKEN != ''
-        run: |
-          curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-            -d chat_id="${TG_CHAT_ID}" \
-            -d parse_mode="HTML" \
-            -d text="$(printf \
-              '🦊 <b>OrangeFox CI · Xiaomi Spinel</b>\n\n❌ Build FAILED!\n\n📱 Device: <code>spinel</code>\n🌿 Branch: <code>%s</code>\n🌲 Logs: <a href="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}">View logs</a>' \
-              "$FOX_BRANCH")"
+          if-no-files-found: error
+          retention-days: 14
 
       # ── LDCheck (optional) — tools/ lives in Builder branch, checked out at ci/ ──
       - name: Run LDCheck
