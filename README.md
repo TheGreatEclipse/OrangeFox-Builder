@@ -11,7 +11,6 @@ This repo uses **two branches** that serve different purposes:
 | Branch | Purpose |
 |--------|---------|
 | `Builder` | Holds the workflow file (`.github/workflows/build.yml`) and the optional LDCheck tools (`tools/ldcheck`, `tools/libneeds`) |
-| `Tree` | Holds the device tree (the `.mk` files, `BoardConfig.mk`, `Android.mk`, etc.) for spinel |
 
 > The workflow checks out both branches on the runner at build time — you never need to merge them.
 
