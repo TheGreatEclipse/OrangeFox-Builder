@@ -33,19 +33,6 @@ your-repo/
 │       └── libneeds        ← optional, only needed if you enable LDCheck
 ```
 
-### 2 — Add secrets (optional but recommended)
-
-Go to **Settings → Secrets and variables → Actions → New repository secret** and add:
-
-| Secret | What it is |
-|--------|-----------|
-| `TG_TOKEN` | Telegram bot token — get one from [@BotFather](https://t.me/BotFather) |
-| `TG_CHAT_ID` | Your Telegram chat / channel ID |
-
-If you skip these, the build will still work — Telegram notifications will just be silently skipped.
-
----
-
 ## Running a build
 
 1. Go to your repo on GitHub → **Actions** tab.
